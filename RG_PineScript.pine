@@ -1538,7 +1538,513 @@ bgcolor(buyCondition ? color.new(color.green, 95) :
 
 // MA 플롯
 plot(maShort, "MA20", color.orange, 2)
-plot(maLong, "MA50", color.blue, 2)yellow, text_size=size.tiny)
+plot(maLong, "MA50", color.blue, 2)
+
+// ============================================
+// PART 25: max_bars_back 오류 (중요!)
+// ============================================
+
+// 25.1 자동 감지 실패 오류
+// 오류: 조건문 내부에서 시리즈 참조 시 Pine이 길이 감지 못함
+// 잘못된 예:
+// test = 0.0
+// if bar_index > 1000
+//     test := ta.roc(close, 20)  // Pine이 20바 참조 감지 못함
+
+// 올바른 예 1: max_bars_back 명시
+// indicator("Fix max_bars_back", max_bars_back=50)
+
+// 올바른 예 2: 조건문 밖으로 이동
+testValue = 0.0
+rocValue = ta.roc(close, 20)  // 먼저 계산
+if bar_index > 1000
+    testValue := rocValue
+
+// 25.2 그림 객체 시간 참조 오류
+// 오류: 라인/박스가 과거를 참조할 때
+// 잘못된 예:
+// if barstate.isrealtime
+//     line.new(bar_index[500], close, bar_index, close)  // 오류!
+
+// 올바른 예: max_bars_back 설정
+// max_bars_back(time, 500)  // 시간 시리즈 버퍼 확장
+
+// 25.3 동적 오프셋 오류
+// 오류: 변수로 히스토리 참조
+dynamicOffset = 10
+
+// 잘못된 사용:
+// value = close[dynamicOffset]  // 오류 가능
+
+// 올바른 사용: 함수 내에서 max_bars_back 명시
+safeHistoricalAccess(simple int maxOffset) =>
+    // max_bars_back(close, maxOffset)  // 필요시 명시
+    bar_index >= maxOffset ? close[maxOffset] : na
+
+historicalValue = safeHistoricalAccess(10)
+
+// ============================================
+// PART 26: 변수 스코프 세부 오류
+// ============================================
+
+// 26.1 전역 vs 로컬 혼동
+globalVar = 100
+
+myFunction() =>
+    localVar = 200  // 함수 내부에서만 유효
+    globalResult = globalVar + localVar  // globalVar 접근 가능
+    globalResult
+
+functionResult = myFunction()
+// localVar  // 오류! 여기서 접근 불가
+
+// 26.2 var 스코프 오류
+// var는 선언된 스코프에서만 유지
+if close > open
+    var int localCounter = 0  // if 블록 내에서만 유효
+    localCounter += 1
+
+// 올바른 패턴: 외부에서 선언
+var int properCounter = 0
+if close > open
+    properCounter += 1
+
+// 26.3 함수 간 변수 공유 오류
+var float sharedValue = 0.0
+
+function1() =>
+    sharedValue := close  // 전역 변수 수정 가능
+    sharedValue
+
+function2() =>
+    sharedValue * 2  // 전역 변수 읽기 가능
+
+result1 = function1()
+result2 = function2()
+
+// ============================================
+// PART 27: 전략(Strategy) 특화 오류
+// ============================================
+
+// 27.1 strategy vs indicator 혼동
+// 오류: indicator에서 strategy 함수 사용 불가
+// 잘못된 예 (indicator에서):
+// strategy.entry("Long", strategy.long)  // 오류!
+
+// indicator에서는 alertcondition 사용
+// strategy에서는 strategy.entry 사용
+
+// 27.2 포지션 크기 계산 오류
+// 잘못된 계산:
+// qty = 100  // 고정 수량
+
+// 올바른 계산: 자본 기반
+accountBalance = 10000
+riskPercent = 2.0
+stopLossPercent = 5.0
+positionSize = (accountBalance * riskPercent / 100) / (close * stopLossPercent / 100)
+
+// 27.3 주문 중복 오류
+var bool inLongPosition = false
+
+// 잘못된 로직:
+// if buyCondition
+//     strategy.entry("Long", strategy.long)  // 중복 진입 가능
+
+// 올바른 로직:
+if buyCondition and not inLongPosition
+    inLongPosition := true
+    // strategy.entry("Long", strategy.long)
+
+if sellCondition and inLongPosition
+    inLongPosition := false
+    // strategy.close("Long")
+
+// ============================================
+// PART 28: 성능 및 타임아웃 오류
+// ============================================
+
+// 28.1 루프 타임아웃
+// 오류: 과도한 반복
+// 잘못된 예:
+// for i = 0 to 50000  // 너무 많은 반복
+//     calculation += i
+
+// 올바른 예: 제한된 반복
+const int MAX_ITERATIONS = 500
+limitedSum = 0.0
+for i = 0 to math.min(bar_index, MAX_ITERATIONS)
+    limitedSum += i
+
+// 28.2 request.security 남용
+// 오류: 너무 많은 security 호출 (최대 40개)
+// 잘못된 패턴: 여러 심볼 개별 호출
+
+// 올바른 패턴: 튜플로 묶어서 호출
+getMultiData() =>
+    [close, open, high, low, volume]
+
+[c1, o1, h1, l1, v1] = request.security("BTCUSD", "D", getMultiData())
+
+// 28.3 과도한 그림 객체
+// 오류: 라인/레이블 무제한 생성
+// 최대 제한: 라인 500개, 레이블 500개, 박스 500개
+
+var lineCount = 0
+const int MAX_LINES = 50
+
+createSafeLine(int x1, float y1, int x2, float y2) =>
+    if lineCount < MAX_LINES
+        lineCount += 1
+        line.new(x1, y1, x2, y2, color=color.blue)
+
+// ============================================
+// PART 29: 타입 명시 오류
+// ============================================
+
+// 29.1 타입 추론 실패
+// 오류: Pine이 타입을 결정 못함
+// 잘못된 예:
+// value = na  // 타입 불명확
+
+// 올바른 예: 명시적 타입
+float typedValue = na
+int intValue = na(int)
+string strValue = na(string)
+
+// 29.2 시리즈 타입 오해
+// simple: 컴파일 시점 또는 입력에서 결정
+// series: 바마다 변할 수 있음
+
+simpleValue = 10  // simple int
+seriesValue = close  // series float
+
+// 함수 매개변수에 타입 한정자 필수
+calculateFixed(simple int period) =>
+    ta.sma(close, period)  // period는 상수여야 함
+
+calculateDynamic(series float source) =>
+    source * 2  // source는 바마다 변할 수 있음
+
+fixedResult = calculateFixed(20)
+dynamicResult = calculateDynamic(close)
+
+// 29.3 const 제약
+// const는 컴파일 타임 상수만 가능
+const int FIXED_PERIOD = 14
+const float MULTIPLIER = 1.5
+
+// 잘못된 사용:
+// const float dynamic = close  // 오류!
+
+// ============================================
+// PART 30: 케이스 센서티브 오류
+// ============================================
+
+// 30.1 대소문자 구분
+// Pine Script는 대소문자 구분
+myVariable = 10
+// MyVariable = 20  // 다른 변수
+// myvariable = 30  // 또 다른 변수
+
+// 30.2 내장 함수 대소문자
+// 올바른: ta.sma(), ta.ema()
+// 잘못된: ta.SMA(), ta.Ema()
+
+correctSMA = ta.sma(close, 20)
+// wrongSMA = ta.SMA(close, 20)  // 오류!
+
+// 30.3 상수 명명 규칙
+// 권장: 대문자 + 언더스코어
+const int MAX_PERIOD = 200
+const float DEFAULT_MULTIPLIER = 2.0
+
+// ============================================
+// PART 31: 예약어 충돌
+// ============================================
+
+// 31.1 예약어를 변수명으로 사용
+// 잘못된 예:
+// close = 100  // 'close'는 예약어
+// open = 50    // 'open'도 예약어
+// strategy = 1 // 'strategy'도 예약어
+
+// 올바른 예:
+myClose = 100
+myOpen = 50
+myStrategy = 1
+
+// 31.2 함수명 예약어
+// 예약어: if, for, while, switch, true, false, na
+// 사용 불가능한 함수명
+
+// 잘못된:
+// myIf() => ...  // if와 혼동 가능
+
+// 올바른:
+myCondition() => close > open
+
+// ============================================
+// PART 32: 괄호/브래킷 불일치
+// ============================================
+
+// 32.1 괄호 개수 불일치
+// 잘못된 예:
+// result = ta.sma(close, 20  // 닫는 괄호 누락
+// result = ta.sma(close, 20))  // 괄호 하나 많음
+
+// 올바른 예:
+correctResult1 = ta.sma(close, 20)
+
+// 32.2 중첩 괄호 실수
+// 복잡한 계산에서 실수 쉬움
+// 잘못된:
+// calc = ((close + open) * 2 - high  // 닫는 괄호 누락
+
+// 올바른:
+calc = ((close + open) * 2) - high
+
+// 32.3 배열 브래킷 혼동
+myArr = array.new_float(10)
+array.set(myArr, 0, close)  // 올바른
+// value = myArr[0]  // 오류! array.get() 사용해야 함
+correctValue = array.get(myArr, 0)
+
+// ============================================
+// PART 33: 들여쓰기 오류 (매우 흔함!)
+// ============================================
+
+// 33.1 일관되지 않은 들여쓰기
+// Pine Script는 4칸 스페이스 또는 1 탭
+// 잘못된 예:
+// if close > open
+//   value = 1  // 2칸 스페이스
+//     value2 = 2  // 4칸 스페이스 (불일치!)
+
+// 올바른 예: 일관된 4칸
+if close > open
+    indentValue1 = 1
+    indentValue2 = 2
+
+// 33.2 함수 내부 들여쓰기
+myFunc() =>
+    localValue = 100
+    if localValue > 50
+        localValue * 2
+    else
+        localValue / 2
+
+indentResult = myFunc()
+
+// 33.3 다중 라인 표현식 들여쓰기
+longCalculation = 
+     ta.sma(close, 20) + 
+     ta.ema(close, 50) + 
+     ta.rsi(close, 14)
+
+// ============================================
+// PART 34: 논리 연산자 오류
+// ============================================
+
+// 34.1 = vs == 혼동
+// 잘못된 예:
+// if close = open  // 할당 연산자, 비교 아님!
+
+// 올바른 예:
+if close == open  // 비교 연산자
+    // 실행
+
+// 34.2 논리 연산자 우선순위
+// and > or 순서로 평가
+condition_a = close > open
+condition_b = volume > ta.sma(volume, 20)
+condition_c = rsi14 > 50
+
+// 잘못된 이해:
+// result = condition_a or condition_b and condition_c
+// 예상: (condition_a or condition_b) and condition_c
+// 실제: condition_a or (condition_b and condition_c)
+
+// 올바른 사용: 명시적 괄호
+clearResult = (condition_a or condition_b) and condition_c
+
+// 34.3 not 연산자 위치
+// 올바른 사용
+notCondition = not condition_a
+validCheck = not na(close)
+
+// 잘못된 사용:
+// if condition_a not  // 오류!
+
+// ============================================
+// PART 35: alert 오류
+// ============================================
+
+// 35.1 alertcondition 위치 오류
+// alertcondition은 전역 스코프에서만
+
+// 잘못된 예:
+// if close > open
+//     alertcondition(true, "Alert")  // 오류!
+
+// 올바른 예:
+alertConditionValue = close > open and volume > ta.sma(volume, 20)
+alertcondition(alertConditionValue, "볼륨 급등", "가격 상승 + 볼륨 증가")
+
+// 35.2 alert 메시지 동적 생성 불가
+// alertcondition의 메시지는 고정 문자열
+
+// 잘못된 예:
+// alertcondition(condition, "Price: " + str.tostring(close))  // 오류!
+
+// 올바른 예:
+alertcondition(alertConditionValue, "신호", "조건 충족")
+
+// ============================================
+// PART 36: 문자열 처리 오류
+// ============================================
+
+// 36.1 문자열 연결 제한
+// + 연산자로 연결 가능
+str1 = "Hello"
+str2 = "World"
+combined = str1 + " " + str2
+
+// 36.2 str.tostring() 포맷
+priceStr = str.tostring(close, format.mintick)
+volumeStr = str.tostring(volume, format.volume)
+percentStr = str.tostring(percentChange, "#.##%")
+
+// 36.3 문자열 비교
+symbol1 = syminfo.ticker
+symbol2 = "BTCUSD"
+isMatch = symbol1 == symbol2  // 대소문자 구분
+
+// 대소문자 무시 비교
+lowerSymbol = str.lower(symbol1)
+isMatchIgnoreCase = lowerSymbol == str.lower(symbol2)
+
+// ============================================
+// PART 37: barstate 오해
+// ============================================
+
+// 37.1 barstate 조건들
+// barstate.isfirst: 첫 번째 바
+// barstate.islast: 마지막 바 (실시간)
+// barstate.ishistory: 과거 바
+// barstate.isrealtime: 실시간 바
+// barstate.isnew: 새로운 바
+// barstate.isconfirmed: 바 확정됨
+
+// 37.2 초기화 패턴
+var bool initialized = false
+if barstate.isfirst
+    initialized := true
+    // 한 번만 실행
+
+// 37.3 실시간 vs 과거 구분
+if barstate.ishistory
+    // 과거 바 처리
+    historicalValue = close
+else if barstate.isrealtime
+    // 실시간 바 처리
+    realtimeValue = close
+
+// ============================================
+// PART 38: 디버깅 기법
+// ============================================
+
+// 38.1 라벨로 디버깅
+debugMode = input.bool(false, "디버그 모드")
+
+if debugMode and bar_index % 10 == 0
+    debugText = "바: " + str.tostring(bar_index) + 
+         "\n종가: " + str.tostring(close, format.mintick) +
+         "\n볼륨: " + str.tostring(volume)
+    
+    label.new(bar_index, high, debugText, 
+         style=label.style_label_down, 
+         color=color.yellow, 
+         textcolor=color.black,
+         size=size.small)
+
+// 38.2 plot으로 변수 추적
+debugPlot = debugMode ? rsi14 : na
+plot(debugPlot, "RSI 디버그", color.yellow, 1, plot.style_circles)
+
+// 38.3 bgcolor로 조건 확인
+bgcolor(debugMode and buyCondition ? color.new(color.lime, 70) : na, title="매수 조건")
+bgcolor(debugMode and sellCondition ? color.new(color.red, 70) : na, title="매도 조건")
+
+// 38.4 테이블로 상태 추적
+if debugMode and barstate.islast
+    var table debugTable = table.new(position.top_left, 2, 10, 
+         bgcolor=color.new(color.black, 80), 
+         border_width=1)
+    
+    table.cell(debugTable, 0, 0, "변수", text_color=color.white)
+    table.cell(debugTable, 1, 0, "값", text_color=color.white)
+    
+    table.cell(debugTable, 0, 1, "bar_index", text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 1, str.tostring(bar_index), text_color=color.aqua, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 2, "close", text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 2, str.tostring(close), text_color=color.aqua, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 3, "maShort", text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 3, str.tostring(maShort), text_color=color.aqua, text_size=size.tiny)
+    
+    table.cell(debugTable, 0, 4, "rsi14", text_color=color.white, text_size=size.tiny)
+    table.cell(debugTable, 1, 4, str.tostring(rsi14), text_color=color.aqua, text_size=size.tiny)
+
+// ============================================
+// PART 39: 버전 호환성 오류
+// ============================================
+
+// 39.1 버전별 차이
+// v1-v3: 구버전 (사용 권장 안함)
+// v4: study() 사용
+// v5-v6: indicator() 사용
+
+// v4 방식:
+// study("My Indicator")
+
+// v6 방식:
+// indicator("My Indicator")
+
+// 39.2 함수명 변경
+// v4: sma(), ema()
+// v5+: ta.sma(), ta.ema()
+
+// 39.3 더 이상 사용되지 않는 기능
+// security() -> request.security()
+// hline() -> 여전히 사용 가능하지만 plot 권장
+
+// ============================================
+// 최종 종합 체크리스트
+// ============================================
+
+if barstate.islast
+    var table checklistTable = table.new(position.middle_left, 2, 20, 
+         bgcolor=color.new(color.purple, 85), 
+         border_width=2, border_color=color.fuchsia)
+    
+    table.cell(checklistTable, 0, 0, "체크리스트", 
+         bgcolor=color.new(color.purple, 60), text_color=color.white)
+    table.cell(checklistTable, 1, 0, "✓", 
+         bgcolor=color.new(color.purple, 60), text_color=color.white)
+    
+    checklist = array.from(
+         "버전 선언", "타입 명시", "var 사용", "barstate 체크",
+         "NA 처리", "0 나눗셈", "배열 범위", "리페인팅 방지",
+         "예약어 회피", "들여쓰기", "괄호 일치", "대소문자",
+         "max_bars_back", "성능 최적화", "디버깅", "주석 작성")
+    
+    for i = 0 to math.min(array.size(checklist) - 1, 15)
+        table.cell(checklistTable, 0, i + 1, array.get(checklist, i), 
+             text_color=color.white, text_size=size.tiny)
+        table.cell(checklistTable, 1, i + 1, "✓", 
+             text_color=color.lime, text_size=size.small)yellow, text_size=size.tiny)
     table.cell(errorDashboard, 1, row, "series/simple", text_color=color.white, text_size=size.tiny)
     table.cell(errorDashboard, 2, row, "타입 한정자 오류", text_color=color.orange, text_size=size.tiny)
     table.cell(errorDashboard, 3, row, "명시적 타입 지정", text_color=color.lime, text_size=size.tiny)
